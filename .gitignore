@@ -1,0 +1,7 @@
+# secrets and personal data: never commit
+config.json
+data.json
+media/
+server.log
+.impeccable/
+node_modules/

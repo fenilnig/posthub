@@ -1,0 +1,9 @@
+{
+  "port": 3000,
+  "password": "pick-a-long-password-for-phone-access",
+  "publicBaseUrl": "https://your-pc.your-tailnet.ts.net",
+  "x": { "client_id": "", "client_secret": "" },
+  "linkedin": { "client_id": "", "client_secret": "" },
+  "youtube": { "client_id": "", "client_secret": "" },
+  "instagram": { "client_id": "", "client_secret": "" }
+}

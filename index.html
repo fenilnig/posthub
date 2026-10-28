@@ -1,0 +1,63 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Post Hub</title>
+<style>
+body{font:15px system-ui;max-width:860px;margin:20px auto;padding:0 16px;background:#111;color:#eee}
+input,textarea,button{font:inherit;padding:6px 10px;border-radius:6px;border:1px solid #444;background:#1c1c1c;color:#eee}
+button{cursor:pointer}button.on{background:#2b59d9;border-color:#2b59d9;color:#fff}
+.card{background:#1c1c1c;border:1px solid #333;border-radius:8px;padding:12px;margin:10px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}a{color:#7aa2ff}.ok{color:#4ade80}.er{color:#f87171}label{margin-right:10px}
+</style></head><body>
+<h1>Post Hub</h1>
+<div class="row" id="tabs"></div>
+<div class="card" id="conn"></div>
+<div class="card">
+ <textarea id="t" rows="5" style="width:100%" placeholder="Caption. YouTube uses the first line as the title. X is limited to 280 characters."></textarea>
+ <div class="row" style="margin-top:8px"><input type="file" id="f" accept="video/*,image/*" multiple><span id="fs"></span></div>
+ <div class="row" style="margin-top:8px"><label>🎵 Music (optional)</label><input type="file" id="m" accept="audio/*"><span id="ms"></span></div>
+ <div class="row" style="margin-top:8px"><span id="pls"></span><input type="datetime-local" id="w"><button class="on" onclick="add()">Post / schedule</button></div>
+ <small>Leave the date empty to post right away. Pick 2–10 files for an Instagram carousel; photos and videos can be mixed (PNG/WEBP become JPEG; videos become Instagram-safe MP4). Music is baked into the video; with photos it makes a Reel slideshow, because Instagram's API can't add music to carousels.</small>
+</div>
+<div id="q"></div>
+<script>
+let S, B, media = '', music = '';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const NAMES = {x:'X (Twitter)', linkedin:'LinkedIn', youtube:'YouTube', instagram:'Instagram'};
+async function load(){ S = await (await fetch('/api/state')).json(); B = B || Object.keys(S.brands)[0]; draw(); }
+function draw(){
+  const br = S.brands[B];
+  tabs.innerHTML = Object.entries(S.brands).map(([k,v]) => `<button class="${k==B?'on':''}" onclick="B='${k}';draw()">${esc(v.name)}</button>`).join('');
+  conn.innerHTML = br.p.map(p => S.connected.includes(B+':'+p)
+    ? `<span class="ok">✓ ${NAMES[p]} ${esc(S.names[B+':'+p]||'')}</span> &nbsp; <a href="/connect/${B}/${p}">switch account</a>`
+    : S.configured.includes(p) ? `<a href="/connect/${B}/${p}">Connect ${NAMES[p]}</a>` : `<span class="er">${NAMES[p]}: no keys in config.json</span>`).join('<br>');
+  pls.innerHTML = br.p.map(p => `<label><input type="checkbox" value="${p}" ${S.connected.includes(B+':'+p)?'checked':''}> ${NAMES[p]}</label>`).join('');
+  q.innerHTML = S.posts.filter(p => p.brand == B).reverse().map(p => `<div class="card"><div class="row"><small>${new Date(p.when).toLocaleString()}</small>
+    <button style="margin-left:auto" onclick="del('${p.id}')">✕</button></div>${esc(p.text)}${p.media?`<br><small>🎞 ${esc(p.media)}</small>`:''}
+    <div>${Object.entries(p.status).map(([k,v]) => v=='manual'
+      ? `<div class="row"><small>${NAMES[k]}: waiting for you</small><button class="on" onclick="shareX('${p.id}')">Share to X</button><button onclick="mark('${p.id}','${k}')">Mark posted</button></div>`
+      : `<small class="${v=='done'?'ok':v.startsWith('error')?'er':''}">${NAMES[k]}: ${esc(v)}</small>`).join('<br>')}</div></div>`).join('');
+}
+const up = async file => (await (await fetch('/api/upload?name=' + encodeURIComponent(file.name), {method:'POST', body:file})).json()).name;
+f.onchange = async () => {
+  if (!f.files.length) return; fs.textContent = 'uploading…'; const names = [];
+  for (const file of [...f.files].sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric:true}))) names.push(await up(file)); // 01, 02… = slide order
+  media = names.join(','); fs.textContent = '✓ ' + names.length + ' file(s)';
+};
+m.onchange = async () => { if (!m.files[0]) return; ms.textContent = 'uploading…'; music = await up(m.files[0]); ms.textContent = '✓ ' + music; };
+async function add(){
+  const platforms = [...document.querySelectorAll('#pls input:checked')].map(i => i.value);
+  const r = await fetch('/api/post', {method:'POST', body:JSON.stringify({brand:B, platforms, text:t.value, media, music, when: w.value ? new Date(w.value).toISOString() : ''})});
+  if (!r.ok) return alert(await r.text());
+  t.value = w.value = f.value = m.value = fs.textContent = ms.textContent = media = music = ''; load();
+}
+// X's API is paid, so X posts go out through the phone's share sheet (media + caption), then you tap Post in the X app.
+async function shareX(id){
+  const p = S.posts.find(q => q.id == id); let files = [];
+  for (const n of (p.media || '').split(',').filter(Boolean)) { const b = await (await fetch('/media/' + encodeURIComponent(n))).blob(); files.push(new File([b], n, {type: b.type})); }
+  if (files.length && navigator.canShare && navigator.canShare({files})) {
+    try { await navigator.share({text: p.text, files}); return; } catch (e) { if (e.name == 'AbortError') return; }
+  }
+  window.open('https://x.com/intent/post?text=' + encodeURIComponent(p.text), '_blank'); // fallback: caption only, attach the file by hand
+}
+async function mark(id, platform){ await fetch('/api/mark', {method:'POST', body:JSON.stringify({id, platform})}); load(); }
+async function del(id){ if (confirm('Delete from the list? Already-posted content stays posted.')) { await fetch('/api/delete', {method:'POST', body:JSON.stringify({id})}); load(); } }
+load(); setInterval(load, 15000);
+</script></body></html>
